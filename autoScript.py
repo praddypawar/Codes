@@ -1,73 +1,87 @@
-import re
 import os
+import re
 
-def read_changes(output_file):
-    """Reads the changes from the output.txt file and organizes them by file."""
-    file_changes = {}
-    current_file = None
-    
-    with open(output_file, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
+def find_matches_in_file(file_path, search_pattern):
+    """
+    Find lines containing the search pattern in a file, including continuation lines.
 
-    # Parse each line in the output file
-    for line in lines:
-        if line.startswith("File:"):
-            # Extract the file path from the line
-            current_file = line.strip().replace("File: ", "")
-            file_changes[current_file] = []
-        elif line.startswith("  Line"):
-            # Match lines like: '  Line 77: print("called predict api..")'
-            match = re.match(r"  Line (\d+): (.+)", line.strip())
-            if match:
-                line_number = int(match.group(1))  # Extract line number
-                content = match.group(2)  # Extract content of the line
-                # Add to the corresponding file's changes list
-                file_changes[current_file].append((line_number, content))
+    Args:
+        file_path (str): Path to the file.
+        search_pattern (str): Text or regex pattern to search for.
 
-    return file_changes
-
-def apply_changes(file_path, changes):
-    """Applies changes from the changes list to the given file."""
-    if not os.path.exists(file_path):
-        print(f"File {file_path} does not exist.")
-        return
-    
+    Returns:
+        list: List of matches with line numbers and content.
+    """
+    matches = []
     try:
-        with open(file_path, 'r+', encoding='utf-8') as file:
-            lines = file.readlines()
-            
-            # Apply changes to lines based on the changes list
-            for line_num, new_content in changes:
-                print(line_num, new_content)
-                if line_num <= len(lines):
-                    print(f"Before change at line {line_num}: {lines[line_num - 1].strip()}")
-                    
-                    # If 'DELETE' is specified, remove the line
-                    if new_content == 'DELETE':
-                        print(f"Deleting line {line_num}: {lines[line_num - 1].strip()}")
-                        lines.pop(line_num - 1)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if re.search(search_pattern, line):
+                block = [(i + 1, line.strip())]  # Line number starts from 1
+                # Check continuation lines
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].strip()
+                    if next_line.startswith(("(", "[", "{", ".", "\\")) or next_line == "" or next_line.startswith(" "):
+                        block.append((j + 1, next_line))
+                        j += 1
                     else:
-                        # Otherwise, update the line with the new content
-                        lines[line_num - 1] = new_content + "\n"
-                        print(f"After change at line {line_num}: {lines[line_num - 1].strip()}")
-            
-            # Write the modified lines back to the file
-            file.seek(0)
-            file.writelines(lines)
-            print(f"Changes applied successfully to {file_path}!")
+                        break
+                matches.append(block)
+                i = j - 1  # Skip to the last line of the block
+            i += 1
     except Exception as e:
-        print(f"Error applying changes to {file_path}: {e}")
+        matches.append([(-1, f"Error reading file {file_path}: {e}")])
+    return matches
 
-def main():
-    output_file = 'output.txt'  # Path to your output.txt
-    
-    # Step 1: Read changes from the output.txt file
-    file_changes = read_changes(output_file)
 
-    # Step 2: Apply the changes to each file listed in output.txt
-    for file_path, changes in file_changes.items():
-        print(f"\nApplying changes to file: {file_path}")
-        apply_changes(file_path, changes)
+def search_directory(directory, search_pattern, file_extension=None, output_file="output.txt"):
+    """
+    Search for a text pattern in all files of a directory and write results to a file.
 
+    Args:
+        directory (str): Root directory to search.
+        search_pattern (str): Text or regex pattern to search for.
+        file_extension (str): File extension filter, or None for all files.
+        output_file (str): File to save the results.
+    """
+    results = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file_extension and not file.endswith(file_extension):
+                continue
+
+            file_path = os.path.join(root, file)
+            matches = find_matches_in_file(file_path, search_pattern)
+            if matches:
+                results.append((file_path, matches))
+
+    # Write results to a file in proper format
+    with open(output_file, 'w', encoding='utf-8') as out:
+        for file_path, matches in results:
+            out.write(f"\nFile: {file_path}\n")
+            out.write("=" * 80 + "\n")
+            for block in matches:
+                for line_number, content in block:
+                    if line_number == -1:
+                        out.write(f"  {content}\n")
+                    else:
+                        out.write(f"  Line {line_number}: {content}\n")
+            out.write("\n")
+
+
+# Example usage
 if __name__ == "__main__":
-    main()
+    # Configure your paths and search term
+    project_dir = "/path/to/your/project"  # Replace with your project directory
+    search_term = r"old_text"  # Replace with your search text or regex
+    file_ext = ".txt"  # Specify file extension, or set to None for all files
+    output_path = "output.txt"  # File where results will be saved
+
+    print(f"Searching for '{search_term}' in '{project_dir}'...")
+    search_directory(project_dir, search_term, file_extension=file_ext, output_file=output_path)
+    print(f"Results saved to '{output_path}'.")
